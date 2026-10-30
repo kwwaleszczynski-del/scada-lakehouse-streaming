@@ -115,6 +115,8 @@ def evaluate_dq_performance(silver_qc_df: pd.DataFrame) -> tuple[pd.DataFrame, d
 
     rows = []
     f1_scores = []
+    precisions = []
+    recalls = []
     for cls in FAULT_CLASSES:
         tp = int(np.sum((y_true == cls) & (y_pred == cls)))
         fp = int(np.sum((y_true != cls) & (y_pred == cls)))
@@ -124,6 +126,8 @@ def evaluate_dq_performance(silver_qc_df: pd.DataFrame) -> tuple[pd.DataFrame, d
         rec = tp / max(tp + fn, 1)
         f1 = 2.0 * prec * rec / max(prec + rec, 1e-12)
         f1_scores.append(f1)
+        precisions.append(prec)
+        recalls.append(rec)
         rows.append(
             {
                 "fault_class": cls,
@@ -147,6 +151,8 @@ def evaluate_dq_performance(silver_qc_df: pd.DataFrame) -> tuple[pd.DataFrame, d
 
     details = {
         "macro_f1": macro_f1,
+        "macro_precision": round(float(np.mean(precisions)), 4),
+        "macro_recall": round(float(np.mean(recalls)), 4),
         "total_evaluated_intervals": int(len(silver_qc_df)),
         "total_injected_fault_intervals": int(np.sum(y_true != "HEALTHY")),
         "class_metrics": {r["fault_class"]: r for r in rows},

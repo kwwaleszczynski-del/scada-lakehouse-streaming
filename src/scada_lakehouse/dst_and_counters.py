@@ -116,6 +116,11 @@ def reconcile_cumulative_counter(
     return out
 
 
+def _n_quarter_hours(ts: pd.Series) -> int:
+    """Number of distinct 15-minute keys in a timestamp column (naive local or tz-aware UTC)."""
+    return int(pd.to_datetime(ts).dt.floor("15min").nunique())
+
+
 def evaluate_dst_transitions(truth_df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """Evaluate 25 Oct 2026 (25h fall-back) and 29 Mar 2026 (23h spring-forward) reconciliation."""
     # 1. Extract 25 October 2026 Warsaw local day (2026-10-24 22:00 UTC to 2026-10-25 22:59 UTC = 25 hours = 1500 min)
@@ -157,9 +162,12 @@ def evaluate_dst_transitions(truth_df: pd.DataFrame) -> tuple[pd.DataFrame, dict
             labels_25h.append(dt_w.strftime("%H:%M %Z"))
     hourly_1h["bucket_1h_utc"] = hourly_1h["bucket_1h_utc"].dt.strftime("%Y-%m-%d %H:%M UTC")
     hourly_1h["warsaw_hour_label"] = labels_25h
-    hourly_1h["naive_local_mwh"] = hourly_1h["fleet_mwh"]
-    # Under naive overwrite, 02:00 CEST (fold=0) is lost (overwritten by 02:00 CET)
-    hourly_1h.loc[hourly_1h["warsaw_hour_label"] == "02:00 CEST (fold=0)", "naive_local_mwh"] = 0.0
+    # Hourly energy that survives the naive local-key overwrite, placed on the same 25-hour UTC axis
+    naive_hourly_kwh = naive_oct.groupby(naive_oct["timestamp_utc"].dt.floor("1h"))["delta_kwh_true"].sum()
+    naive_hourly_kwh.index = naive_hourly_kwh.index.strftime("%Y-%m-%d %H:%M UTC")
+    hourly_1h["naive_local_mwh"] = np.round(
+        hourly_1h["bucket_1h_utc"].map(naive_hourly_kwh).fillna(0.0).to_numpy() / 1000.0, 3
+    )
 
     # 2. Simulate 29 March 2026 spring-forward 23-hour day (2026-03-28 23:00 UTC to 2026-03-29 21:59 UTC)
     mar_idx = pd.date_range("2026-03-28 23:00:00+00:00", "2026-03-29 21:59:00+00:00", freq="1min")
@@ -185,13 +193,18 @@ def evaluate_dst_transitions(truth_df: pd.DataFrame) -> tuple[pd.DataFrame, dict
     naive_mar_mwh = float(mar_corrupted["delta_kwh_true"].sum() / 1000.0)
     reconciled_mar_mwh = float(mar_disamb["delta_kwh_true"].sum() / 1000.0)
 
+    # Share of kept rows whose reconstructed UTC timestamp equals the true UTC acquisition timestamp
+    oct_match_pct = float((disamb_oct["timestamp_utc_reconstructed"] == disamb_oct["timestamp_utc"]).mean() * 100.0)
+    mar_match_pct = float((mar_disamb["timestamp_utc_reconstructed"] == mar_disamb["timestamp_utc"]).mean() * 100.0)
+
     summary_rows = [
         {
             "dst_date": "2026-10-25",
             "transition_type": "Autumn Fall-Back (CEST -> CET, 25h day)",
-            "expected_quarter_hours": 100,
-            "naive_quarter_hours": 96,
-            "reconciled_quarter_hours": 100,
+            "expected_quarter_hours": _n_quarter_hours(oct_sub["timestamp_utc"]),
+            "naive_quarter_hours": _n_quarter_hours(naive_oct["timestamp_local_str"]),
+            "reconciled_quarter_hours": _n_quarter_hours(disamb_oct["timestamp_utc_reconstructed"]),
+            "utc_timestamps_matched_pct": round(oct_match_pct, 2),
             "true_energy_mwh": round(true_oct_mwh, 3),
             "naive_energy_mwh": round(naive_oct_mwh, 3),
             "reconciled_energy_mwh": round(reconciled_oct_mwh, 3),
@@ -202,9 +215,10 @@ def evaluate_dst_transitions(truth_df: pd.DataFrame) -> tuple[pd.DataFrame, dict
         {
             "dst_date": "2026-03-29",
             "transition_type": "Spring Forward (CET -> CEST, 23h day)",
-            "expected_quarter_hours": 92,
-            "naive_quarter_hours": 96,
-            "reconciled_quarter_hours": 92,
+            "expected_quarter_hours": _n_quarter_hours(mar_df["timestamp_utc"]),
+            "naive_quarter_hours": _n_quarter_hours(mar_corrupted["timestamp_local_str"]),
+            "reconciled_quarter_hours": _n_quarter_hours(mar_disamb["timestamp_utc_reconstructed"]),
+            "utc_timestamps_matched_pct": round(mar_match_pct, 2),
             "true_energy_mwh": round(true_mar_mwh, 3),
             "naive_energy_mwh": round(naive_mar_mwh, 3),
             "reconciled_energy_mwh": round(reconciled_mar_mwh, 3),

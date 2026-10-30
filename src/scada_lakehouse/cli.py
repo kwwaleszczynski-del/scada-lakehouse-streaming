@@ -43,10 +43,14 @@ def run_pipeline(repo_root: Path = REPO_ROOT) -> dict:
     dq_df, dq_details = evaluate_dq_performance(silver_qc_df)
 
     gold_df = build_gold_15m_table(silver_qc_df)
-    parquet_paths = write_medallion_parquet_store(bronze_df, silver_qc_df, gold_df, lake_dir)
+    parquet_paths = {
+        k: Path(v).relative_to(repo_root).as_posix()
+        for k, v in write_medallion_parquet_store(bronze_df, silver_qc_df, gold_df, lake_dir).items()
+    }
 
     # Save CSV and SQL artifacts in results/
     bench_df.to_csv(results_dir / "ingestion_benchmark.csv", index=False)
+    ingest_details["reconnect_bursts"].to_csv(results_dir / "reconnect_bursts.csv", index=False)
     dq_df.to_csv(results_dir / "dq_confusion_summary.csv", index=False)
     dst_df.to_csv(results_dir / "dst_reconciliation.csv", index=False)
 
@@ -72,46 +76,65 @@ def run_pipeline(repo_root: Path = REPO_ROOT) -> dict:
         img_dir=img_dir,
     )
 
+    wind_specs = [s for s in specs if s.asset_type == "wind"]
+    pv_specs = [s for s in specs if s.asset_type == "pv"]
+    naive_row = bench_df.iloc[0]
+    upsert_row = bench_df.iloc[-1]
+    oct_row = dst_df.loc[dst_df["dst_date"] == "2026-10-25"].iloc[0]
+    mar_row = dst_df.loc[dst_df["dst_date"] == "2026-03-29"].iloc[0]
     verification_payload = {
         "fleet": {
             "n_assets": len(specs),
-            "n_wind_turbines": 10,
-            "wind_capacity_mw": 30.0,
-            "n_pv_inverters": 4,
-            "pv_capacity_mw": 20.0,
-            "n_pcc_meters": 2,
-            "total_capacity_mw": 50.0,
+            "n_wind_turbines": len(wind_specs),
+            "wind_capacity_mw": sum(s.rated_kw for s in wind_specs) / 1000.0,
+            "n_pv_inverters": len(pv_specs),
+            "pv_capacity_mw": sum(s.rated_kw for s in pv_specs) / 1000.0,
+            "n_pcc_meters": sum(1 for s in specs if s.asset_type.startswith("meter_")),
+            "total_capacity_mw": sum(s.rated_kw for s in wind_specs + pv_specs) / 1000.0,
             "truth_1m_rows": int(len(truth_df)),
             "bronze_raw_rows": int(len(bronze_df)),
             "silver_dedup_rows": int(len(silver_qc_df)),
             "gold_15m_rows": int(len(gold_df)),
-            "duplicate_retry_rate_pct": 1.80,
+            "duplicate_retry_packets": int(bronze_df["is_duplicate_retry"].sum()),
+            "duplicate_retry_rate_pct": round(float(bronze_df["is_duplicate_retry"].sum()) / len(truth_df) * 100.0, 2),
             "n_lte_outages": len(outages),
+            "n_delayed_intervals": ingest_details["n_delayed_intervals"],
+            "max_arrival_lag_h": ingest_details["max_arrival_lag_h"],
         },
         "watermark_headline": {
-            "naive_peak_15m_inflation_x": ingest_details["peak_export_inflation_x"],
-            "naive_affected_hours_mae_pct": ingest_details["affected_hours_mae_pct"],
-            "watermarked_delayed_recovery_pct": ingest_details["watermarked_recovery_pct"],
-            "watermarked_duplicate_double_count_pct": ingest_details["duplicate_double_count_watermarked_pct"],
+            "naive_reconnect_ratio_median_x": ingest_details["naive_reconnect_ratio_median_x"],
+            "naive_reconnect_ratio_min_x": ingest_details["naive_reconnect_ratio_min_x"],
+            "naive_reconnect_ratio_max_x": ingest_details["naive_reconnect_ratio_max_x"],
+            "naive_affected_buckets_nmae_pct": float(naive_row["affected_buckets_energy_nmae_pct"]),
+            "naive_duplicate_energy_pct": float(naive_row["duplicate_energy_pct"]),
+            "upsert_delayed_recovery_pct": float(upsert_row["delayed_intervals_recovered_pct"]),
+            "upsert_duplicate_energy_pct": float(upsert_row["duplicate_energy_pct"]),
+            "upsert_affected_buckets_nmae_pct": float(upsert_row["affected_buckets_energy_nmae_pct"]),
         },
         "dst_headline": {
-            "oct25_expected_qh": 100,
-            "oct25_naive_qh": 96,
-            "oct25_reconciled_qh": 100,
+            "oct25_expected_qh": int(oct_row["expected_quarter_hours"]),
+            "oct25_naive_qh": int(oct_row["naive_quarter_hours"]),
+            "oct25_reconciled_qh": int(oct_row["reconciled_quarter_hours"]),
+            "oct25_utc_timestamps_matched_pct": float(oct_row["utc_timestamps_matched_pct"]),
             "oct25_lost_mwh_naive": dst_details["oct25_lost_mwh_naive"],
             "oct25_lost_pct_naive": dst_details["oct25_lost_pct_naive"],
-            "mar29_expected_qh": 92,
-            "mar29_reconciled_qh": 92,
+            "oct25_reconciled_error_mwh": float(oct_row["reconciled_error_mwh"]),
+            "mar29_expected_qh": int(mar_row["expected_quarter_hours"]),
+            "mar29_naive_qh": int(mar_row["naive_quarter_hours"]),
+            "mar29_reconciled_qh": int(mar_row["reconciled_quarter_hours"]),
             "mar29_phantom_mwh_naive": dst_details["mar29_phantom_mwh_naive"],
         },
         "dq_headline": {
             "macro_f1": dq_details["macro_f1"],
+            "macro_precision": dq_details["macro_precision"],
+            "macro_recall": dq_details["macro_recall"],
             "total_evaluated_intervals": dq_details["total_evaluated_intervals"],
             "total_injected_fault_intervals": dq_details["total_injected_fault_intervals"],
             "class_metrics": dq_details["class_metrics"],
         },
         "ingestion_benchmark": bench_df.to_dict(orient="records"),
         "dst_reconciliation": dst_df.to_dict(orient="records"),
+        "reconnect_bursts": ingest_details["reconnect_bursts"].to_dict(orient="records"),
         "parquet_files": parquet_paths,
     }
     (results_dir / "verification.json").write_text(
@@ -156,9 +179,9 @@ def main() -> None:
     print(
         f"scada-lakehouse-streaming pipeline complete:\n"
         f"  Bronze rows: {payload['fleet']['bronze_raw_rows']:,} -> Silver rows: {payload['fleet']['silver_dedup_rows']:,} -> Gold 15m rows: {payload['fleet']['gold_15m_rows']:,}\n"
-        f"  Naive 15-min peak inflation: {wh['naive_peak_15m_inflation_x']:.2f}x | Affected-hour MAE: {wh['naive_affected_hours_mae_pct']:.2f}%\n"
-        f"  Watermarked (W=6h) recovery: {wh['watermarked_delayed_recovery_pct']:.1f}% | Duplicate double-count: {wh['watermarked_duplicate_double_count_pct']:.2f}%\n"
-        f"  DST 25-Oct-2026 (25h) naive loss: -{dst['oct25_lost_mwh_naive']:.2f} MWh ({dst['oct25_lost_pct_naive']:.2f}%) | Reconciled error: 0.000 MWh\n"
+        f"  Naive reconnect-bucket energy ratio (median over outages): {wh['naive_reconnect_ratio_median_x']:.2f}x | Affected-bucket nMAE: {wh['naive_affected_buckets_nmae_pct']:.2f}%\n"
+        f"  Upsert (W=6h) recovery: {wh['upsert_delayed_recovery_pct']:.1f}% | Duplicate energy counted: {wh['upsert_duplicate_energy_pct']:.2f}%\n"
+        f"  DST 25-Oct-2026 (25h) naive loss: -{dst['oct25_lost_mwh_naive']:.2f} MWh ({dst['oct25_lost_pct_naive']:.2f}%) | Reconciled error: {dst['oct25_reconciled_error_mwh']:.3f} MWh\n"
         f"  Silver DQ macro-F1: {dq['macro_f1']:.3f}"
     )
 

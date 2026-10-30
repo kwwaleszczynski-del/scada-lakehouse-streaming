@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "scada-lakehouse-streaming"
 version = "0.1.0"
-description = "Event-driven wind, PV and meter telemetry pipeline: event-time watermarking for LTE router backfill bursts, Europe/Warsaw DST transition handling, automated SCADA sensor QC, and Bronze-Silver-Gold Parquet and TimescaleDB continuous aggregates."
+description = "Simulated wind, PV and meter telemetry pipeline: event-time watermarking for LTE router backfill bursts, Europe/Warsaw DST transition handling, rule-based SCADA sensor QC, Bronze-Silver-Gold Parquet and TimescaleDB continuous-aggregate DDL."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

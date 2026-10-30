@@ -72,9 +72,13 @@ def generate_all_figures(
 
     ax1.bar(x_idx, sc["naive_record_count"], color=ORANGE, alpha=0.82, width=0.72, label="Arriving 1-min packets / 15-min bucket")
     ax1.axhline(15.0, color=BLUE, ls="--", lw=1.2, label="Nominal 15 packets / quarter-hour")
-    ax1.axvspan(12, 25, color=RED, alpha=0.10, label="3.5 h LTE router outage (buffered on PLC)")
+    out_idx = np.flatnonzero(sc["is_outage_bucket"])
+    ax1.axvspan(
+        out_idx[0] - 0.5, out_idx[-1] + 0.5, color=RED, alpha=0.10,
+        label=f"{sc['outage_minutes']} min LTE router outage (buffered on PLC)",
+    )
     ax1.set_xticks(tick_pos, tick_lbl)
-    ax1.set_xlabel("UTC time on 2026-10-21 [HH:MM]")
+    ax1.set_xlabel(f"UTC time on {sc['timestamps'][0][:10]} [HH:MM]")
     ax1.set_ylabel("Packets arriving in ingestion window [-]")
     ax1.set_title("A. Broker arrival burst in processing time (ingested_at)")
     ax1.legend(loc="upper left", frameon=True)
@@ -83,11 +87,18 @@ def generate_all_figures(
     naive_mw = np.array(sc["naive_power_kw"]) / 1000.0
     wm_mw = np.array(sc["watermarked_power_kw"]) / 1000.0
 
-    ax2.plot(x_idx, naive_mw, color=RED, lw=1.5, ls="-", marker="o", ms=3.2, label="Naive ingestion-time window (3.8x peak spike)")
-    ax2.plot(x_idx, true_mw, color=GREY, lw=2.2, ls=":", label="True PCC feeder export [MW]")
-    ax2.plot(x_idx, wm_mw, color=GREEN, lw=1.6, ls="--", label="Event-time watermark W=6h + upsert (100% rec.)")
+    upsert_rec = float(bench_df["delayed_intervals_recovered_pct"].iloc[-1])
+    ax2.plot(
+        x_idx, naive_mw, color=RED, lw=1.5, ls="-", marker="o", ms=3.2,
+        label=f"Naive ingestion-time window ({sc['reconnect_ratio_x']:.1f}x true energy in reconnect bucket)",
+    )
+    ax2.plot(x_idx, true_mw, color=GREY, lw=2.2, ls=":", label=f"True {sc['asset_id']} export [MW]")
+    ax2.plot(
+        x_idx, wm_mw, color=GREEN, lw=1.6, ls="--",
+        label=f"Event-time watermark W=6h + upsert ({upsert_rec:.1f}% rec.)",
+    )
     ax2.set_xticks(tick_pos, tick_lbl)
-    ax2.set_xlabel("UTC time on 2026-10-21 [HH:MM]")
+    ax2.set_xlabel(f"UTC time on {sc['timestamps'][0][:10]} [HH:MM]")
     ax2.set_ylabel("15-min average export power [MW]")
     ax2.set_title("B. Reconstructed 15-min settlement power (timestamp_utc)")
     ax2.legend(loc="upper left", frameon=True)
@@ -106,9 +117,14 @@ def generate_all_figures(
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.2, 4.3))
 
-    ax1.bar(h_idx - 0.18, true_h_mwh, width=0.36, color=BLUE, label="UTC fold-aware disambiguation (25 h = 100 qh)")
+    oct_qh = int(dst_df.loc[dst_df["dst_date"] == "2026-10-25", "reconciled_quarter_hours"].iloc[0])
+    rep_idx = [i for i, r in enumerate(oct_rows) if r["warsaw_hour_label"].startswith("02:00")]
+    ax1.bar(
+        h_idx - 0.18, true_h_mwh, width=0.36, color=BLUE,
+        label=f"UTC fold-aware disambiguation ({len(oct_rows)} h = {oct_qh} qh)",
+    )
     ax1.bar(h_idx + 0.18, naive_h_mwh, width=0.36, color=RED, alpha=0.85, label="Naive local-time key overwrite (02B overwrites 02A)")
-    ax1.axvspan(1.6, 3.4, color=ORANGE, alpha=0.14, label="Repeated 02:00 CEST (fold=0) / 02:00 CET (fold=1)")
+    ax1.axvspan(min(rep_idx) - 0.4, max(rep_idx) + 0.4, color=ORANGE, alpha=0.14, label="Repeated 02:00 CEST (fold=0) / 02:00 CET (fold=1)")
     ax1.set_xticks(h_idx[::2], [h_labels[i] for i in h_idx[::2]], rotation=30)
     ax1.set_xlabel("Europe/Warsaw local hour on 2026-10-25 (25-hour fall-back day)")
     ax1.set_ylabel("Hourly fleet generation [MWh]")
@@ -139,7 +155,8 @@ def generate_all_figures(
     ax1.plot(t_fl, fl["wind_true_ms"], color=GREY, lw=1.4, ls=":", label="True wind speed [m/s]")
     ax1.plot(t_fl, fl["wind_raw_ms"], color=RED, lw=1.6, label="Raw frozen ultrasonic anemometer")
     ax1.plot(t_fl, fl["wind_clean_ms"], color=GREEN, lw=1.4, ls="--", label="Silver QC-imputed wind speed")
-    ax1.axvspan(40, 100, color=RED, alpha=0.10, label="Flagged FLATLINE (std=0 >= 30m)")
+    flat_idx = np.flatnonzero(np.asarray(fl["dq_flag"]) == "FLATLINE")
+    ax1.axvspan(flat_idx[0], flat_idx[-1] + 1, color=RED, alpha=0.10, label="Flagged FLATLINE (std=0 >= 30m)")
     ax1.set_xlabel("Elapsed minutes (WTG-01) [min]")
     ax1.set_ylabel("Wind speed [m/s]")
     ax1.set_title("A. Frozen anemometer flatline QC")
@@ -158,13 +175,17 @@ def generate_all_figures(
 
     cn = dq_details["sample_counter_wtg01"]
     t_cn = np.arange(len(cn["timestamps"]))
-    ax3.plot(t_cn, cn["raw_delta_kwh"], color=RED, lw=1.5, label="Raw diff (uint32 wrap: -4.29e6 kWh)")
-    ax3.plot(t_cn, cn["reconciled_delta_kwh"], color=BLUE, lw=1.8, label="Reconciled modulo-2^32 delta_kWh")
-    ax3.set_ylim(-60.0, 65.0)
+    raw_cn = np.asarray(cn["raw_delta_kwh"], dtype=float)
+    rec_cn = np.asarray(cn["reconciled_delta_kwh"], dtype=float)
+    wrap_i = int(np.argmin(raw_cn))
+    y_lim = 1.6 * float(np.max(np.abs(rec_cn)))
+    ax3.plot(t_cn, raw_cn, color=RED, lw=1.5, label=f"Raw diff (uint32 wrap: {raw_cn[wrap_i]:.3g} kWh)")
+    ax3.plot(t_cn, rec_cn, color=BLUE, lw=1.8, label="Reconciled modulo-2^32 delta_kWh")
+    ax3.set_ylim(-y_lim, y_lim)
     ax3.annotate(
-        "Raw wrap delta = -4,294,967 kWh\n(reconciled to +39.4 kWh)",
-        xy=(30, -55),
-        xytext=(6, -42),
+        f"Raw wrap delta = {raw_cn[wrap_i]:,.0f} kWh\n(reconciled to {rec_cn[wrap_i]:+.1f} kWh)",
+        xy=(wrap_i, -0.92 * y_lim),
+        xytext=(max(wrap_i - 24, 1), -0.7 * y_lim),
         arrowprops={"arrowstyle": "->", "color": RED, "lw": 1.1},
         fontsize=8.0,
         color=RED,
@@ -178,22 +199,18 @@ def generate_all_figures(
 
     # -------------------------------------------------------------------------
     # Figure 4: medallion_latency_completeness.png
-    # Completeness & affected-hour energy MAE / RMSE across Bronze, Naive Silver, and Watermarked Silver/Gold
+    # Delayed-interval recovery & outage-affected energy nMAE / RMSE across naive and watermarked modes
     # -------------------------------------------------------------------------
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.2, 4.2))
 
     labels = [
-        "Naive\n(No Dedup)",
-        "Watermark\nW = 0.5 h",
-        "Watermark\nW = 1.0 h",
-        "Watermark\nW = 2.0 h",
-        "Watermark\nW = 4.0 h",
-        "W = 6.0 h\n+ Upsert",
+        "Naive\n(No Dedup)" if w == 0.0 else (f"W = {w:.1f} h\n+ Upsert" if "Upsert" in m else f"Watermark\nW = {w:.1f} h")
+        for m, w in zip(bench_df["mode"], bench_df["watermark_horizon_h"])
     ]
     x = np.arange(len(bench_df))
     comp_vals = bench_df["delayed_intervals_recovered_pct"].to_numpy()
-    mae_vals = bench_df["affected_hours_energy_mae_pct"].to_numpy()
-    rmse_vals = bench_df["fleet_15m_power_rmse_kw"].to_numpy()
+    mae_vals = bench_df["affected_buckets_energy_nmae_pct"].to_numpy()
+    rmse_vals = bench_df["asset_15m_power_rmse_kw"].to_numpy()
 
     colors = [RED, ORANGE, ORANGE, BLUE, BLUE, GREEN]
     bars = ax1.bar(x, comp_vals, color=colors, width=0.58)
@@ -206,14 +223,14 @@ def generate_all_figures(
 
     ax2_twin = ax2.twinx()
     ax2_twin.grid(False)
-    l1 = ax2.plot(x, mae_vals, color=RED, lw=2.0, marker="o", ms=5.0, label="Affected-hour energy MAE [%] (left)")
-    l2 = ax2_twin.plot(x, rmse_vals, color=BLUE, lw=1.8, ls="--", marker="s", ms=4.8, label="15-min power RMSE [kW] (right)")
+    l1 = ax2.plot(x, mae_vals, color=RED, lw=2.0, marker="o", ms=5.0, label="Outage-affected bucket energy nMAE [%] (left)")
+    l2 = ax2_twin.plot(x, rmse_vals, color=BLUE, lw=1.8, ls="--", marker="s", ms=4.8, label="Per-asset 15-min power RMSE [kW] (right)")
     ax2.set_xticks(x, labels, fontsize=8.0)
-    ax2.set_ylabel("Affected-hour interval energy MAE [%]", color=RED)
-    ax2_twin.set_ylabel("Fleet 15-min settlement power RMSE [kW]", color=BLUE)
-    ax2.set_ylim(-0.5, 16.5)
+    ax2.set_ylabel("Outage-affected bucket energy nMAE [%]", color=RED)
+    ax2_twin.set_ylabel("Per-asset 15-min power RMSE [kW]", color=BLUE)
+    ax2.set_ylim(-0.03 * max(mae_vals), max(mae_vals) * 1.18)
     ax2_twin.set_ylim(-20.0, max(rmse_vals) * 1.18)
-    ax2.set_title("B. Settlement energy MAE & power RMSE across Medallion modes")
+    ax2.set_title("B. Outage-affected energy nMAE & power RMSE by mode")
 
     lines = l1 + l2
     lbls = [l.get_label() for l in lines]

@@ -1,3 +1,3 @@
-dst_date,transition_type,expected_quarter_hours,naive_quarter_hours,reconciled_quarter_hours,true_energy_mwh,naive_energy_mwh,reconciled_energy_mwh,naive_error_mwh,naive_error_pct,reconciled_error_mwh
-2026-10-25,"Autumn Fall-Back (CEST -> CET, 25h day)",100,96,100,465.499,437.47,465.499,-28.028,-6.02,0.0
-2026-03-29,"Spring Forward (CET -> CEST, 23h day)",92,96,92,340.823,357.56,340.823,16.737,4.91,0.0
+dst_date,transition_type,expected_quarter_hours,naive_quarter_hours,reconciled_quarter_hours,utc_timestamps_matched_pct,true_energy_mwh,naive_energy_mwh,reconciled_energy_mwh,naive_error_mwh,naive_error_pct,reconciled_error_mwh
+2026-10-25,"Autumn Fall-Back (CEST -> CET, 25h day)",100,96,100,100.0,465.499,437.47,465.499,-28.028,-6.02,0.0
+2026-03-29,"Spring Forward (CET -> CEST, 23h day)",92,96,92,100.0,340.823,357.56,340.823,16.737,4.91,0.0

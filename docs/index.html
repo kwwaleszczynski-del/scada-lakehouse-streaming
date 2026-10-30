@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Streaming SCADA telemetry, late-arriving backfill and Medallion lakehouse (TimescaleDB / Parquet)</title>
-<meta name="description" content="Event-driven wind, PV and meter telemetry pipeline: event-time watermarking for LTE router backfill bursts, Europe/Warsaw DST transition handling, automated SCADA sensor QC, and Bronze-Silver-Gold Parquet and TimescaleDB continuous aggregates.">
+<meta name="description" content="Simulated wind, PV and meter telemetry pipeline: event-time watermarking for LTE router backfill bursts, Europe/Warsaw DST transition handling, rule-based SCADA sensor QC, Bronze-Silver-Gold Parquet and TimescaleDB continuous-aggregate DDL.">
 <style>
 :root {
   color-scheme: light;
@@ -51,30 +51,29 @@ pre.sql-box { margin: 0; padding: 12px; background: #f6f6f3; border: 1px solid v
 <p>Event-driven wind, solar PV and PCC revenue meter pipeline across a 50 MW hybrid plant (10 &times; 3.0 MW wind
 turbines, 4 &times; 5.0 MW PV inverters, 2 PCC revenue meters): quantifying how naive ingestion-time windowing fails during
 cellular LTE router reconnect bursts, how fold-aware UTC normalization resolves 23 h / 25 h Central European
-(<code>Europe/Warsaw</code>) DST transitions, and how automated Silver DQ rules feed 15-minute Parquet and TimescaleDB
-continuous aggregates. Code and SQL:
+(<code>Europe/Warsaw</code>) DST transitions, and how rule-based Silver DQ checks feed 15-minute Gold Parquet tables
+(with TimescaleDB continuous-aggregate DDL generated alongside). Code and SQL:
 <a href="https://github.com/kwwaleszczynski-del/scada-lakehouse-streaming">github.com/kwwaleszczynski-del/scada-lakehouse-streaming</a>.</p>
+<p class="note warn">Scope: every number on this page is computed by the repository's pipeline from a seeded, synthetic
+7-day fleet simulation. No MQTT/Kafka broker and no database run here; broker arrival times are simulated, and the
+TimescaleDB DDL is generated as text but not executed.</p>
 
 <div class="tiles" id="kpi-tiles"></div>
 
 <h2>1. Interactive LTE router outage &amp; event-time watermark simulator</h2>
-<p>Select a field LTE router outage scenario and adjust the streaming watermark horizon <em>W</em> (0.5 h to 6.0 h).
-During an LTE drop, 1-minute PLC packets buffer locally and flush in a high-rate burst upon reconnect. Grouping by broker
-arrival time (<code>ingested_at</code>) creates a zero-export hole during the outage followed by up to a <strong>3.8&times;</strong>
-apparent 15-minute peak export spike, whereas event-time watermarking (<code>W = 6.0 h</code>) with idempotent
-<code>ON CONFLICT (asset_id, timestamp_utc) DO UPDATE</code> recovers 100.0 % of delayed intervals with 0.00 % duplicate
-double-counting.</p>
+<p>Select a simulated LTE router outage and a streaming watermark horizon <em>W</em>. During an outage, 1-minute PLC
+packets buffer locally and flush in a burst on reconnect. Grouping by broker arrival time (<code>ingested_at</code>) leaves
+the outage quarter-hours empty and piles the backlog into the reconnect quarter-hour: across the
+<span id="txt-n-out"></span> simulated outages that bucket carries <strong><span id="txt-ratio"></span>&times;</strong> its
+true energy (median; range <span id="txt-ratio-range"></span>). Event-time bucketing with <code>W = 6 h</code> and an
+idempotent <code>ON CONFLICT (asset_id, timestamp_utc) DO UPDATE</code> places <span id="txt-rec"></span> % of delayed
+intervals in their own quarter-hour and counts <span id="txt-dup"></span> % duplicate energy.</p>
 
 <div class="card" style="margin-bottom: 14px;">
   <div class="controls">
     <div class="ctrl-box">
       <div class="ctrl-head"><span>LTE Router Outage Scenario</span></div>
-      <select id="sel-scenario">
-        <option value="OUT-06" selected>OUT-06: PCC-MTR-01 (30 MW Wind Feeder) 3.5 h LTE outage &amp; 3.8x burst</option>
-        <option value="OUT-01">OUT-01: WTG-01 (3.0 MW Wind Turbine) 2.0 h morning LTE drop</option>
-        <option value="OUT-10">OUT-10: PV-INV-03 (5.0 MW Solar Inverter) 2.25 h irradiance ramp outage</option>
-        <option value="OUT-11">OUT-11: WTG-07 (3.0 MW Wind Turbine) 4.0 h deep PLC ring-buffer outage</option>
-      </select>
+      <select id="sel-scenario"></select>
     </div>
     <div class="ctrl-box">
       <div class="ctrl-head"><span>Event-Time Watermark Horizon (W)</span><span class="ctrl-val" id="lbl-w">6.0 h (+ Upsert)</span></div>
@@ -92,9 +91,10 @@ double-counting.</p>
 <h2>2. Central European DST transition (25 October 2026, 25-hour fall-back day)</h2>
 <p>Legacy field loggers exporting local <code>Europe/Warsaw</code> CSV files repeat <code>02:00:00..02:59:00</code> twice during the
 October fall-back transition (first in CEST <code>UTC+2</code>, then in CET <code>UTC+1</code>). Naive local-key deduplication
-overwrites <code>02A CEST</code> with <code>02B CET</code>, losing 1 full hour of generation (-28.03 MWh, -6.02 % of daily fleet
-energy). Deterministic disambiguation via monotonic <code>kWh_total</code> register continuity assigns <code>fold=0/1</code> and
-recovers all 100 quarter-hours (0.000 MWh error).</p>
+overwrites <code>02A CEST</code> with <code>02B CET</code> and loses one hour of generation (-<span id="txt-dst-lost"></span> MWh,
+-<span id="txt-dst-pct"></span> % of the day's fleet energy). Assigning <code>fold=0/1</code> by occurrence order within the
+monotonic <code>kWh_total</code> register restores all <span id="txt-dst-qh"></span> quarter-hours, with
+<span id="txt-dst-match"></span> % of rows mapped back to their true UTC timestamp.</p>
 
 <div class="two">
   <div class="card"><div id="plot-dst-hourly" class="plot"></div></div>
@@ -104,17 +104,19 @@ recovers all 100 quarter-hours (0.000 MWh error).</p>
 <h2>3. Automated Bronze &rarr; Silver SCADA sensor QC &amp; counter rollover recovery</h2>
 <p>Inspect how the Silver DQ engine isolates and imputes frozen ultrasonic anemometers (<code>FLATLINE</code>, rolling 30-min
 <code>std == 0</code>), pyranometer EMI surges &amp; nighttime offsets (<code>SPIKE_OR_BOUNDS</code>), and cumulative
-<code>uint32</code> energy counter rollovers at <code>4,294,967.296 kWh</code> (<code>COUNTER_RESET</code>), achieving
-<strong>0.986 macro-F1</strong> across 161,280 1-minute asset-intervals.</p>
+<code>uint32</code> energy counter rollovers at <code>4,294,967.296 kWh</code> (<code>COUNTER_RESET</code>):
+<strong><span id="txt-f1"></span> macro-F1</strong> across <span id="txt-n-1m"></span> 1-minute asset-intervals. The faults
+are injected by the same simulator the rules were written for, so this is a consistency check, not a field accuracy
+estimate; every miss is an onset minute of an injected window (see the README).</p>
 
 <div class="card" style="margin-bottom: 14px;">
   <div class="controls">
     <div class="ctrl-box">
       <div class="ctrl-head"><span>Inspect Sensor / Counter Fault Mode</span></div>
       <select id="sel-dq">
-        <option value="flatline" selected>Frozen Ultrasonic Anemometer (WTG-01: 60-min flatline at 7.77 m/s)</option>
-        <option value="spike">Pyranometer EMI Spike &gt; 1,350 W/m&sup2; (PV-INV-01)</option>
-        <option value="counter">Cumulative Register uint32 Rollover at 4,294,967.296 kWh (WTG-01)</option>
+        <option value="flatline" selected>Frozen ultrasonic anemometer flatline (WTG-01)</option>
+        <option value="spike">Pyranometer EMI spike above the 1,350 W/m&sup2; bound (PV-INV-01)</option>
+        <option value="counter">Cumulative register uint32 rollover at 4,294,967.296 kWh (WTG-01)</option>
       </select>
     </div>
   </div>
@@ -131,9 +133,10 @@ recovers all 100 quarter-hours (0.000 MWh error).</p>
   <div class="card"><pre class="sql-box" id="sql-viewer"></pre></div>
 </div>
 
-<p class="note" style="margin-top: 28px;">Standards reference: IEC 61724-1 (Photovoltaic system performance monitoring),
-IEC 61400-12-1 (Wind turbine power performance testing), IANA <code>Europe/Warsaw</code> PEP 495 <code>fold</code> disambiguation.
-MIT licence.</p>
+<p class="note" style="margin-top: 28px;">Standards named here (IEC 61724-1 PV performance monitoring, IEC 61400-12-1 wind
+power performance) only inspire simplified KPIs and a synthetic power curve; nothing here is a conformant implementation
+(to be verified against the standards). Time zone handling: IANA <code>Europe/Warsaw</code> rules via Python
+<code>zoneinfo</code> and PEP 495 <code>fold</code>. MIT licence.</p>
 </main>
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -173,17 +176,39 @@ function renderTiles() {
   const dst = H.dst_headline;
   const dq = H.dq_headline;
   const items = [
-    [`${fmt(wh.naive_peak_15m_inflation_x, 1)}x / ${fmt(wh.naive_affected_hours_mae_pct, 1)} %`,
-     "Naive ingestion-time 15-min peak export inflation & affected-hour energy MAE during LTE bursts"],
-    [`${fmt(wh.watermarked_delayed_recovery_pct, 1)} % / ${fmt(wh.watermarked_duplicate_double_count_pct, 2)} %`,
-     "Delayed LTE backfill intervals recovered & duplicate double-counting with W = 6 h + upsert"],
+    [`${fmt(wh.naive_reconnect_ratio_median_x, 1)}x / ${fmt(wh.naive_affected_buckets_nmae_pct, 0)} %`,
+     `Naive ingestion-time: median reconnect-bucket energy vs truth over ${H.fleet.n_lte_outages} outages & energy nMAE in outage-affected buckets`],
+    [`${fmt(wh.upsert_delayed_recovery_pct, 1)} % / ${fmt(wh.upsert_duplicate_energy_pct, 2)} %`,
+     "Delayed LTE backfill intervals placed in their own quarter-hour & duplicate energy counted with W = 6 h + upsert"],
     [`-${fmt(dst.oct25_lost_mwh_naive, 2)} MWh (${fmt(dst.oct25_lost_pct_naive, 2)} %)`,
-     "25 Oct 2026 (25 h DST fall-back) loss under naive local-time key overwrite vs 0.000 MWh in UTC"],
+     `25 Oct 2026 (25 h DST fall-back) loss under naive local-time key overwrite vs ${fmt(dst.oct25_reconciled_error_mwh, 3)} MWh in UTC`],
     [`${fmt(dq.macro_f1, 3)} macro-F1`,
-     `Automated Silver SCADA DQ across ${H.fleet.truth_1m_rows.toLocaleString()} 1-min intervals (flatline, spike, rollover, cross-sensor)`]
+     `Rule-based Silver DQ on ${H.fleet.truth_1m_rows.toLocaleString()} simulated 1-min intervals (faults injected by the same simulator)`]
   ];
   document.getElementById("kpi-tiles").innerHTML = items.map(x =>
     `<div class="card tile"><div class="v">${x[0]}</div><div class="l">${x[1]}</div></div>`
+  ).join("");
+}
+
+function renderProse() {
+  const H = D.headline;
+  const wh = H.watermark_headline;
+  const dst = H.dst_headline;
+  const set = (id, v) => { document.getElementById(id).textContent = v; };
+  set("txt-n-out", H.fleet.n_lte_outages);
+  set("txt-ratio", fmt(wh.naive_reconnect_ratio_median_x, 1));
+  set("txt-ratio-range", `${fmt(wh.naive_reconnect_ratio_min_x, 1)}x to ${fmt(wh.naive_reconnect_ratio_max_x, 1)}x`);
+  set("txt-rec", fmt(wh.upsert_delayed_recovery_pct, 1));
+  set("txt-dup", fmt(wh.upsert_duplicate_energy_pct, 2));
+  set("txt-dst-lost", fmt(dst.oct25_lost_mwh_naive, 2));
+  set("txt-dst-pct", fmt(dst.oct25_lost_pct_naive, 2));
+  set("txt-dst-qh", dst.oct25_reconciled_qh);
+  set("txt-dst-match", fmt(dst.oct25_utc_timestamps_matched_pct, 1));
+  set("txt-f1", fmt(H.dq_headline.macro_f1, 3));
+  set("txt-n-1m", H.fleet.truth_1m_rows.toLocaleString());
+
+  document.getElementById("sel-scenario").innerHTML = Object.values(D.scenarios).map((s, i) =>
+    `<option value="${s.outage_id}"${i === 0 ? " selected" : ""}>${s.title}</option>`
   ).join("");
 }
 
@@ -196,11 +221,11 @@ function updateWatermarkSection() {
 
   document.getElementById("lbl-w").textContent = wIdx === 0 ? "Naive Ingestion-Time" : `${fmt(bRow.watermark_horizon_h, 1)} h`;
   document.getElementById("watermark-readout").innerHTML =
-    `<strong>Selected Mode (${bRow.mode}):</strong> ` +
+    `<strong>Selected Mode (${bRow.mode}), whole fleet:</strong> ` +
     `Delayed backfill recovered = <strong>${fmt(bRow.delayed_intervals_recovered_pct, 1)} %</strong> &nbsp;|&nbsp; ` +
-    `Affected-hour energy MAE = <strong>${fmt(bRow.affected_hours_energy_mae_pct, 2)} %</strong> &nbsp;|&nbsp; ` +
-    `15-min peak inflation = <strong>${fmt(bRow.peak_15m_export_inflation_x, 2)}&times;</strong> &nbsp;|&nbsp; ` +
-    `Duplicate double-count = <strong>${fmt(bRow.duplicate_double_count_pct, 2)} %</strong>`;
+    `Outage-affected bucket energy nMAE = <strong>${fmt(bRow.affected_buckets_energy_nmae_pct, 2)} %</strong> &nbsp;|&nbsp; ` +
+    `Median reconnect-bucket energy ratio = <strong>${fmt(bRow.reconnect_bucket_energy_ratio_median_x, 2)}&times;</strong> &nbsp;|&nbsp; ` +
+    `Duplicate energy counted = <strong>${fmt(bRow.duplicate_energy_pct, 2)} %</strong>`;
 
   Plotly.react("plot-burst", [
     {type: "bar", x: sc.timestamps, y: sc.naive_record_count, name: "Arriving packets / 15-min bucket", marker: {color: COLORS.orange}},
@@ -212,12 +237,7 @@ function updateWatermarkSection() {
     yaxis: axis({title: {text: "Packets per 15-min bucket"}})
   }), cfg);
 
-  const recFrac = bRow.delayed_intervals_recovered_pct / 100.0;
-  const simPower = sc.true_power_kw.map((tp, i) => {
-    if (wIdx === 0) return sc.naive_power_kw[i];
-    const isOutageHole = sc.naive_record_count[i] === 0;
-    return isOutageHole ? Number((tp * recFrac).toFixed(1)) : tp;
-  });
+  const simPower = sc.mode_power_kw[wIdx];
 
   Plotly.react("plot-recon", [
     {type: "scatter", mode: "lines+markers", x: sc.timestamps, y: sc.naive_power_kw,
@@ -259,7 +279,7 @@ function renderDstPlots() {
     {type: "scatter", mode: "lines+markers", x: xLabels, y: cumNaive, name: "Naive local overwrite cumulative [MWh]",
      line: {color: COLORS.red, dash: "dash", width: 2.0}, marker: {size: 5}}
   ], layoutBase({
-    title: {text: "Cumulative daily energy settlement on 25 Oct 2026 (-28.03 MWh naive deficit)", font: {size: 13}},
+    title: {text: `Cumulative daily energy settlement on 25 Oct 2026 (-${fmt(D.headline.dst_headline.oct25_lost_mwh_naive, 2)} MWh naive deficit)`, font: {size: 13}},
     xaxis: axis({title: {text: "Europe/Warsaw Local Hour"}}),
     yaxis: axis({title: {text: "Cumulative daily generation [MWh]"}})
   }), cfg);
@@ -295,6 +315,7 @@ function updateDqSection() {
       yaxis: axis({title: {text: "POA Irradiance [W/m²]"}})
     }), cfg);
   } else {
+    const yLim = 1.6 * Math.max(...S.reconciled_delta_kwh.map(Math.abs));
     Plotly.react("plot-dq-trace", [
       {type: "scatter", mode: "lines+markers", x: S.timestamps, y: S.raw_delta_kwh, name: "Raw register diff [kWh] (wrap < 0)",
        line: {color: COLORS.red, width: 1.8}},
@@ -303,7 +324,7 @@ function updateDqSection() {
     ], layoutBase({
       title: {text: "WTG-01 cumulative active energy register uint32 rollover recovery", font: {size: 13}},
       xaxis: axis({title: {text: "UTC Timestamp"}}),
-      yaxis: axis({title: {text: "1-minute energy delta [kWh]"}, range: [-60, 65]})
+      yaxis: axis({title: {text: "1-minute energy delta [kWh]"}, range: [-yLim, yLim]})
     }), cfg);
   }
 }
@@ -318,9 +339,9 @@ function renderTablesAndSql() {
 
   const bench = D.headline.ingestion_benchmark;
   document.getElementById("tbl-bench").innerHTML =
-    "<thead><tr><th>Pipeline Mode</th><th class='n'>Watermark [h]</th><th class='n'>Delayed Rec. [%]</th><th class='n'>Peak Infl. [&times;]</th><th class='n'>Affected MAE [%]</th><th class='n'>15-m RMSE [kW]</th><th class='n'>Dup. Count [%]</th></tr></thead><tbody>" +
+    "<thead><tr><th>Pipeline Mode</th><th class='n'>Watermark [h]</th><th class='n'>Delayed Rec. [%]</th><th class='n'>Reconnect Ratio [&times;]</th><th class='n'>Affected nMAE [%]</th><th class='n'>15-m RMSE [kW]</th><th class='n'>Dup. Energy [%]</th></tr></thead><tbody>" +
     bench.map(r =>
-      `<tr><td>${r.mode}</td><td class='n'>${fmt(r.watermark_horizon_h, 1)}</td><td class='n'>${fmt(r.delayed_intervals_recovered_pct, 1)}</td><td class='n'>${fmt(r.peak_15m_export_inflation_x, 2)}</td><td class='n'>${fmt(r.affected_hours_energy_mae_pct, 2)}</td><td class='n'>${fmt(r.fleet_15m_power_rmse_kw, 1)}</td><td class='n'>${fmt(r.duplicate_double_count_pct, 2)}</td></tr>`
+      `<tr><td>${r.mode}</td><td class='n'>${fmt(r.watermark_horizon_h, 1)}</td><td class='n'>${fmt(r.delayed_intervals_recovered_pct, 1)}</td><td class='n'>${fmt(r.reconnect_bucket_energy_ratio_median_x, 2)}</td><td class='n'>${fmt(r.affected_buckets_energy_nmae_pct, 2)}</td><td class='n'>${fmt(r.asset_15m_power_rmse_kw, 1)}</td><td class='n'>${fmt(r.duplicate_energy_pct, 2)}</td></tr>`
     ).join("") + "</tbody>";
 
   document.getElementById("sql-viewer").textContent = D.timescaledb_sql;
@@ -331,6 +352,7 @@ document.getElementById("rng-w").addEventListener("input", updateWatermarkSectio
 document.getElementById("sel-dq").addEventListener("change", updateDqSection);
 
 renderTiles();
+renderProse();
 updateWatermarkSection();
 renderDstPlots();
 updateDqSection();

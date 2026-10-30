@@ -1,7 +1,7 @@
-mode,watermark_horizon_h,completeness_pct,delayed_intervals_recovered_pct,duplicate_double_count_pct,peak_15m_export_inflation_x,affected_hours_energy_mae_pct,fleet_15m_power_rmse_kw,total_energy_mwh,true_energy_mwh
-Naive Ingestion-Time (no dedup),0.0,98.12,0.0,1.8,3.8,14.2,1033.86,5165.48,5065.65
-Event-Time Watermark W = 0.5 h (drop late),0.5,98.97,22.07,0.0,1.0,9.85,283.27,5008.95,5065.65
-Event-Time Watermark W = 1.0 h (drop late),1.0,99.3,46.67,0.0,1.0,6.74,261.19,5022.38,5065.65
-Event-Time Watermark W = 2.0 h (drop late),2.0,99.75,81.03,0.0,1.0,2.4,206.39,5045.74,5065.65
-Event-Time Watermark W = 4.0 h (drop late),4.0,100.0,99.62,0.0,1.0,0.05,3.38,5065.57,5065.65
+mode,watermark_horizon_h,completeness_pct,delayed_intervals_recovered_pct,duplicate_energy_pct,reconnect_bucket_energy_ratio_median_x,affected_buckets_energy_nmae_pct,asset_15m_power_rmse_kw,total_energy_mwh,true_energy_mwh
+Naive Ingestion-Time (no dedup),0.0,98.68,0.0,1.97,9.19,185.4,1033.86,5165.48,5065.65
+Event-Time Watermark W = 0.5 h (drop late),0.5,98.97,22.07,0.0,1.0,76.21,283.27,5008.95,5065.65
+Event-Time Watermark W = 1.0 h (drop late),1.0,99.3,46.67,0.0,1.0,58.16,261.19,5022.38,5065.65
+Event-Time Watermark W = 2.0 h (drop late),2.0,99.75,81.03,0.0,1.0,26.76,206.39,5045.74,5065.65
+Event-Time Watermark W = 4.0 h (drop late),4.0,100.0,99.62,0.0,1.0,0.12,3.38,5065.57,5065.65
 Event-Time Watermark W = 6.0 h + Idempotent Upsert,6.0,100.0,100.0,0.0,1.0,0.0,0.0,5065.65,5065.65
