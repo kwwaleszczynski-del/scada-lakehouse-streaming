@@ -1,0 +1,6 @@
+fault_class,support_intervals,true_positives,false_positives,false_negatives,precision,recall,f1_score
+HEALTHY,160511,160511,35,0,0.9998,1.0,0.9999
+FLATLINE,500,476,0,24,1.0,0.952,0.9754
+SPIKE_OR_BOUNDS,101,95,0,6,1.0,0.9406,0.9694
+COUNTER_RESET,8,8,0,0,1.0,1.0,1.0
+CROSS_SENSOR_MISMATCH,160,155,0,5,1.0,0.9688,0.9841

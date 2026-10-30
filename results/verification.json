@@ -1,0 +1,197 @@
+{
+  "fleet": {
+    "n_assets": 16,
+    "n_wind_turbines": 10,
+    "wind_capacity_mw": 30.0,
+    "n_pv_inverters": 4,
+    "pv_capacity_mw": 20.0,
+    "n_pcc_meters": 2,
+    "total_capacity_mw": 50.0,
+    "truth_1m_rows": 161280,
+    "bronze_raw_rows": 164183,
+    "silver_dedup_rows": 161280,
+    "gold_15m_rows": 10752,
+    "duplicate_retry_rate_pct": 1.8,
+    "n_lte_outages": 18
+  },
+  "watermark_headline": {
+    "naive_peak_15m_inflation_x": 3.8,
+    "naive_affected_hours_mae_pct": 14.2,
+    "watermarked_delayed_recovery_pct": 100.0,
+    "watermarked_duplicate_double_count_pct": 0.0
+  },
+  "dst_headline": {
+    "oct25_expected_qh": 100,
+    "oct25_naive_qh": 96,
+    "oct25_reconciled_qh": 100,
+    "oct25_lost_mwh_naive": 28.03,
+    "oct25_lost_pct_naive": 6.02,
+    "mar29_expected_qh": 92,
+    "mar29_reconciled_qh": 92,
+    "mar29_phantom_mwh_naive": 16.74
+  },
+  "dq_headline": {
+    "macro_f1": 0.986,
+    "total_evaluated_intervals": 161280,
+    "total_injected_fault_intervals": 769,
+    "class_metrics": {
+      "HEALTHY": {
+        "fault_class": "HEALTHY",
+        "support_intervals": 160511,
+        "true_positives": 160511,
+        "false_positives": 35,
+        "false_negatives": 0,
+        "precision": 0.9998,
+        "recall": 1.0,
+        "f1_score": 0.9999
+      },
+      "FLATLINE": {
+        "fault_class": "FLATLINE",
+        "support_intervals": 500,
+        "true_positives": 476,
+        "false_positives": 0,
+        "false_negatives": 24,
+        "precision": 1.0,
+        "recall": 0.952,
+        "f1_score": 0.9754
+      },
+      "SPIKE_OR_BOUNDS": {
+        "fault_class": "SPIKE_OR_BOUNDS",
+        "support_intervals": 101,
+        "true_positives": 95,
+        "false_positives": 0,
+        "false_negatives": 6,
+        "precision": 1.0,
+        "recall": 0.9406,
+        "f1_score": 0.9694
+      },
+      "COUNTER_RESET": {
+        "fault_class": "COUNTER_RESET",
+        "support_intervals": 8,
+        "true_positives": 8,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0
+      },
+      "CROSS_SENSOR_MISMATCH": {
+        "fault_class": "CROSS_SENSOR_MISMATCH",
+        "support_intervals": 160,
+        "true_positives": 155,
+        "false_positives": 0,
+        "false_negatives": 5,
+        "precision": 1.0,
+        "recall": 0.9688,
+        "f1_score": 0.9841
+      }
+    }
+  },
+  "ingestion_benchmark": [
+    {
+      "mode": "Naive Ingestion-Time (no dedup)",
+      "watermark_horizon_h": 0.0,
+      "completeness_pct": 98.12,
+      "delayed_intervals_recovered_pct": 0.0,
+      "duplicate_double_count_pct": 1.8,
+      "peak_15m_export_inflation_x": 3.8,
+      "affected_hours_energy_mae_pct": 14.2,
+      "fleet_15m_power_rmse_kw": 1033.86,
+      "total_energy_mwh": 5165.48,
+      "true_energy_mwh": 5065.65
+    },
+    {
+      "mode": "Event-Time Watermark W = 0.5 h (drop late)",
+      "watermark_horizon_h": 0.5,
+      "completeness_pct": 98.97,
+      "delayed_intervals_recovered_pct": 22.07,
+      "duplicate_double_count_pct": 0.0,
+      "peak_15m_export_inflation_x": 1.0,
+      "affected_hours_energy_mae_pct": 9.85,
+      "fleet_15m_power_rmse_kw": 283.27,
+      "total_energy_mwh": 5008.95,
+      "true_energy_mwh": 5065.65
+    },
+    {
+      "mode": "Event-Time Watermark W = 1.0 h (drop late)",
+      "watermark_horizon_h": 1.0,
+      "completeness_pct": 99.3,
+      "delayed_intervals_recovered_pct": 46.67,
+      "duplicate_double_count_pct": 0.0,
+      "peak_15m_export_inflation_x": 1.0,
+      "affected_hours_energy_mae_pct": 6.74,
+      "fleet_15m_power_rmse_kw": 261.19,
+      "total_energy_mwh": 5022.38,
+      "true_energy_mwh": 5065.65
+    },
+    {
+      "mode": "Event-Time Watermark W = 2.0 h (drop late)",
+      "watermark_horizon_h": 2.0,
+      "completeness_pct": 99.75,
+      "delayed_intervals_recovered_pct": 81.03,
+      "duplicate_double_count_pct": 0.0,
+      "peak_15m_export_inflation_x": 1.0,
+      "affected_hours_energy_mae_pct": 2.4,
+      "fleet_15m_power_rmse_kw": 206.39,
+      "total_energy_mwh": 5045.74,
+      "true_energy_mwh": 5065.65
+    },
+    {
+      "mode": "Event-Time Watermark W = 4.0 h (drop late)",
+      "watermark_horizon_h": 4.0,
+      "completeness_pct": 100.0,
+      "delayed_intervals_recovered_pct": 99.62,
+      "duplicate_double_count_pct": 0.0,
+      "peak_15m_export_inflation_x": 1.0,
+      "affected_hours_energy_mae_pct": 0.05,
+      "fleet_15m_power_rmse_kw": 3.38,
+      "total_energy_mwh": 5065.57,
+      "true_energy_mwh": 5065.65
+    },
+    {
+      "mode": "Event-Time Watermark W = 6.0 h + Idempotent Upsert",
+      "watermark_horizon_h": 6.0,
+      "completeness_pct": 100.0,
+      "delayed_intervals_recovered_pct": 100.0,
+      "duplicate_double_count_pct": 0.0,
+      "peak_15m_export_inflation_x": 1.0,
+      "affected_hours_energy_mae_pct": 0.0,
+      "fleet_15m_power_rmse_kw": 0.0,
+      "total_energy_mwh": 5065.65,
+      "true_energy_mwh": 5065.65
+    }
+  ],
+  "dst_reconciliation": [
+    {
+      "dst_date": "2026-10-25",
+      "transition_type": "Autumn Fall-Back (CEST -> CET, 25h day)",
+      "expected_quarter_hours": 100,
+      "naive_quarter_hours": 96,
+      "reconciled_quarter_hours": 100,
+      "true_energy_mwh": 465.499,
+      "naive_energy_mwh": 437.47,
+      "reconciled_energy_mwh": 465.499,
+      "naive_error_mwh": -28.028,
+      "naive_error_pct": -6.02,
+      "reconciled_error_mwh": 0.0
+    },
+    {
+      "dst_date": "2026-03-29",
+      "transition_type": "Spring Forward (CET -> CEST, 23h day)",
+      "expected_quarter_hours": 92,
+      "naive_quarter_hours": 96,
+      "reconciled_quarter_hours": 92,
+      "true_energy_mwh": 340.823,
+      "naive_energy_mwh": 357.56,
+      "reconciled_energy_mwh": 340.823,
+      "naive_error_mwh": 16.737,
+      "naive_error_pct": 4.91,
+      "reconciled_error_mwh": 0.0
+    }
+  ],
+  "parquet_files": {
+    "bronze_parquet": "data_lake\\bronze\\scada_bronze_raw.parquet",
+    "silver_parquet": "data_lake\\silver\\scada_silver_1m.parquet",
+    "gold_parquet": "data_lake\\gold\\scada_gold_15m.parquet"
+  }
+}
