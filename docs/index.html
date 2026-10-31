@@ -40,7 +40,8 @@ th { color: var(--ink2); font-weight: 600; position: sticky; top: 0; background:
 td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
 .note { font-size: 0.84rem; color: var(--muted); }
 .warn { border-left: 3px solid var(--s4); padding-left: 10px; }
-.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 14px; }
+.two > .card { min-width: 0; }
 pre.sql-box { margin: 0; padding: 12px; background: #f6f6f3; border: 1px solid var(--grid); border-radius: 6px;
               font: 12.5px/1.45 "Consolas", "SFMono-Regular", monospace; color: #1b1b1b; max-height: 360px; overflow: auto; }
 </style>
@@ -146,7 +147,14 @@ power performance) only inspire simplified KPIs and a synthetic power curve; not
 <script>
 const D = window.DATA;
 const fmt = (x, d = 1) => x == null || isNaN(x) ? "-" : Number(x).toFixed(d);
-const cfg = {responsive: true, displaylogo: false};
+const NARROW = window.innerWidth < 640;
+const cfg = {responsive: true, displaylogo: false, displayModeBar: NARROW ? false : "hover"};
+// break a title into lines of at most n characters on narrow screens (Plotly does not wrap titles)
+const wrap = (s, n) => !NARROW ? s : s.split(" ").reduce((lines, w) => {
+  const last = lines[lines.length - 1];
+  if (last && (last + " " + w).length <= n) lines[lines.length - 1] = last + " " + w; else lines.push(w);
+  return lines;
+}, []).join("<br>");
 
 const COLORS = {
   blue: "#1f4e78",
@@ -161,16 +169,25 @@ const COLORS = {
 };
 
 function layoutBase(extra) {
-  return Object.assign({
+  // title in the top margin, legend in its own band between title and plot (more room on narrow screens,
+  // where the legend wraps)
+  const out = Object.assign({
     paper_bgcolor: COLORS.surface,
     plot_bgcolor: COLORS.surface,
     font: {family: "system-ui, -apple-system, Segoe UI, sans-serif", color: COLORS.ink, size: 12},
-    margin: {l: 58, r: 22, t: 34, b: 48},
+    margin: {l: 58, r: 22, t: NARROW ? 130 : 76, b: 48},
     hoverlabel: {bgcolor: COLORS.surface, font: {color: "#111111"}},
-    legend: {orientation: "h", y: 1.12, x: 0, font: {size: 11}}
+    legend: {orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: {size: 11}}
   }, extra);
+  if (out.title) out.title = Object.assign({x: 0.01, xanchor: "left", y: 1, yanchor: "top", pad: {t: 10}}, out.title,
+                                           NARROW ? {text: wrap(out.title.text, 44), font: {size: 11.5}} : {});
+  for (const ax of ["xaxis", "yaxis"]) {
+    if (out[ax] && out[ax].title) out[ax].title = Object.assign({}, out[ax].title, {text: wrap(out[ax].title.text, 40)});
+  }
+  return out;
 }
-const axis = extra => Object.assign({gridcolor: COLORS.grid, linecolor: COLORS.axis, zeroline: false}, extra);
+const axis = extra => Object.assign({gridcolor: COLORS.grid, linecolor: COLORS.axis, zeroline: false, automargin: true},
+                                    NARROW ? {nticks: 6} : {}, extra);
 
 function renderTiles() {
   const H = D.headline;
@@ -253,7 +270,7 @@ function updateWatermarkSection() {
     {type: "scatter", mode: "lines", x: sc.timestamps, y: sc.true_power_kw,
      name: "True 15-min power [kW]", line: {color: COLORS.grey, dash: "dot", width: 2.2}},
     {type: "scatter", mode: "lines", x: sc.timestamps, y: simPower,
-     name: `Selected mode (${bRow.mode})`, line: {color: COLORS.green, width: 2.2}}
+     name: wrap(`Selected mode (${bRow.mode})`, 40), line: {color: COLORS.green, width: 2.2}}
   ], layoutBase({
     title: {text: `15-min settlement power [kW]: ${sc.title}`, font: {size: 13}},
     xaxis: axis({title: {text: "UTC Timestamp"}}),
@@ -263,17 +280,24 @@ function updateWatermarkSection() {
 
 function renderDstPlots() {
   const oct = D.oct25_hourly;
-  const xLabels = oct.map(r => r.warsaw_hour_label);
+  const fullLabels = oct.map(r => r.warsaw_hour_label);
+  // short tick labels (the full label stays in the hover): "02A" = 02:00 CEST (fold=0), "02B" = 02:00 CET (fold=1)
+  const xLabels = fullLabels.map(s => s.slice(0, 2) + (s.includes("fold=0") ? "A" : s.includes("fold=1") ? "B" : ""));
+  const hourAxis = axis({title: {text: "Warsaw local hour (02A = 02:00 CEST, 02B = 02:00 CET)"}, type: "category",
+                         tickangle: 0, tickfont: {size: 10}, nticks: NARROW ? 9 : 26});
   const trueMwh = oct.map(r => r.fleet_mwh);
   const naiveMwh = oct.map(r => r.naive_local_mwh);
+  const hover = "%{customdata}: %{y:.2f} MWh<extra>%{fullData.name}</extra>";
 
   Plotly.react("plot-dst-hourly", [
-    {type: "bar", x: xLabels, y: trueMwh, name: "Fold-aware UTC disambiguation (25 h)", marker: {color: COLORS.blue}},
-    {type: "bar", x: xLabels, y: naiveMwh, name: "Naive local key overwrite (02B overwrites 02A)", marker: {color: COLORS.red}}
+    {type: "bar", x: xLabels, y: trueMwh, customdata: fullLabels, hovertemplate: hover,
+     name: "Fold-aware UTC disambiguation (25 h)", marker: {color: COLORS.blue}},
+    {type: "bar", x: xLabels, y: naiveMwh, customdata: fullLabels, hovertemplate: hover,
+     name: "Naive local key overwrite (02B overwrites 02A)", marker: {color: COLORS.red}}
   ], layoutBase({
     barmode: "group",
     title: {text: "Hourly fleet energy across 25-hour autumn DST transition (25 Oct 2026)", font: {size: 13}},
-    xaxis: axis({title: {text: "Europe/Warsaw Local Hour"}}),
+    xaxis: hourAxis,
     yaxis: axis({title: {text: "Hourly fleet energy [MWh]"}})
   }), cfg);
 
@@ -282,13 +306,13 @@ function renderDstPlots() {
   const cumNaive = naiveMwh.map(v => (cN += v, Number(cN.toFixed(2))));
 
   Plotly.react("plot-dst-cum", [
-    {type: "scatter", mode: "lines+markers", x: xLabels, y: cumTrue, name: "Reconciled UTC cumulative [MWh]",
-     line: {color: COLORS.blue, width: 2.2}, marker: {size: 5}},
-    {type: "scatter", mode: "lines+markers", x: xLabels, y: cumNaive, name: "Naive local overwrite cumulative [MWh]",
-     line: {color: COLORS.red, dash: "dash", width: 2.0}, marker: {size: 5}}
+    {type: "scatter", mode: "lines+markers", x: xLabels, y: cumTrue, customdata: fullLabels, hovertemplate: hover,
+     name: "Reconciled UTC cumulative [MWh]", line: {color: COLORS.blue, width: 2.2}, marker: {size: 5}},
+    {type: "scatter", mode: "lines+markers", x: xLabels, y: cumNaive, customdata: fullLabels, hovertemplate: hover,
+     name: "Naive local overwrite cumulative [MWh]", line: {color: COLORS.red, dash: "dash", width: 2.0}, marker: {size: 5}}
   ], layoutBase({
     title: {text: `Cumulative daily energy settlement on 25 Oct 2026 (-${fmt(D.headline.dst_headline.oct25_lost_mwh_naive, 2)} MWh naive deficit)`, font: {size: 13}},
-    xaxis: axis({title: {text: "Europe/Warsaw Local Hour"}}),
+    xaxis: hourAxis,
     yaxis: axis({title: {text: "Cumulative daily generation [MWh]"}})
   }), cfg);
 }

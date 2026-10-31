@@ -101,6 +101,7 @@ def generate_all_figures(
     ax2.set_xlabel(f"UTC time on {sc['timestamps'][0][:10]} [HH:MM]")
     ax2.set_ylabel("15-min average export power [MW]")
     ax2.set_title("B. Reconstructed 15-min settlement power (timestamp_utc)")
+    ax2.set_ylim(ax2.get_ylim()[0], float(np.nanmax(naive_mw)) * 1.45)  # room for the legend above the spike
     ax2.legend(loc="upper left", frameon=True)
 
     _save(fig, img_dir / "lte_backfill_watermark.png")
@@ -129,6 +130,7 @@ def generate_all_figures(
     ax1.set_xlabel("Europe/Warsaw local hour on 2026-10-25 (25-hour fall-back day)")
     ax1.set_ylabel("Hourly fleet generation [MWh]")
     ax1.set_title("A. Hourly generation across 25-hour autumn DST transition")
+    ax1.set_ylim(0, float(max(true_h_mwh.max(), naive_h_mwh.max())) * 1.4)  # legend above the bars
     ax1.legend(loc="upper right", frameon=True)
 
     cum_true = np.cumsum(true_h_mwh)
@@ -140,7 +142,7 @@ def generate_all_figures(
     ax2.set_xlabel("Europe/Warsaw local hour on 2026-10-25")
     ax2.set_ylabel("Cumulative daily fleet energy [MWh]")
     ax2.set_title("B. Cumulative daily settlement energy drift")
-    ax2.legend(loc="upper left", frameon=True)
+    ax2.legend(loc="lower right", frameon=True)
 
     _save(fig, img_dir / "dst_transition_reconciliation.png")
 
@@ -160,7 +162,8 @@ def generate_all_figures(
     ax1.set_xlabel("Elapsed minutes (WTG-01) [min]")
     ax1.set_ylabel("Wind speed [m/s]")
     ax1.set_title("A. Frozen anemometer flatline QC")
-    ax1.legend(loc="lower left", frameon=True, fontsize=7.5)
+    below = {"loc": "upper center", "bbox_to_anchor": (0.5, -0.2), "frameon": False, "fontsize": 7.5}
+    ax1.legend(**below)
 
     sp = dq_details["sample_spike_pv01"]
     t_sp = np.arange(len(sp["timestamps"]))
@@ -171,7 +174,7 @@ def generate_all_figures(
     ax2.set_xlabel("Elapsed minutes (PV-INV-01) [min]")
     ax2.set_ylabel("POA irradiance [W/m2]")
     ax2.set_title("B. Pyranometer EMI spike & bounds QC")
-    ax2.legend(loc="upper right", frameon=True, fontsize=7.5)
+    ax2.legend(**below)
 
     cn = dq_details["sample_counter_wtg01"]
     t_cn = np.arange(len(cn["timestamps"]))
@@ -182,10 +185,10 @@ def generate_all_figures(
     ax3.plot(t_cn, raw_cn, color=RED, lw=1.5, label=f"Raw diff (uint32 wrap: {raw_cn[wrap_i]:.3g} kWh)")
     ax3.plot(t_cn, rec_cn, color=BLUE, lw=1.8, label="Reconciled modulo-2^32 delta_kWh")
     ax3.set_ylim(-y_lim, y_lim)
-    ax3.annotate(
-        f"Raw wrap delta = {raw_cn[wrap_i]:,.0f} kWh\n(reconciled to {rec_cn[wrap_i]:+.1f} kWh)",
+    ax3.annotate(  # text to the right of the clipped wrap spike, so the spike does not cross it
+        f"Raw wrap delta\n= {raw_cn[wrap_i]:,.0f} kWh\n(reconciled to {rec_cn[wrap_i]:+.1f} kWh)",
         xy=(wrap_i, -0.92 * y_lim),
-        xytext=(max(wrap_i - 24, 1), -0.7 * y_lim),
+        xytext=(wrap_i + 4, -0.75 * y_lim),
         arrowprops={"arrowstyle": "->", "color": RED, "lw": 1.1},
         fontsize=8.0,
         color=RED,
@@ -193,7 +196,7 @@ def generate_all_figures(
     ax3.set_xlabel("Elapsed minutes (WTG-01) [min]")
     ax3.set_ylabel("1-min energy increment [kWh]")
     ax3.set_title("C. Cumulative counter rollover recovery")
-    ax3.legend(loc="upper right", frameon=True, fontsize=7.5)
+    ax3.legend(**below)
 
     _save(fig, img_dir / "dq_fault_detection.png")
 
