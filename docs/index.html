@@ -65,9 +65,11 @@ TimescaleDB DDL is generated as text but not executed.</p>
 packets buffer locally and flush in a burst on reconnect. Grouping by broker arrival time (<code>ingested_at</code>) leaves
 the outage quarter-hours empty and piles the backlog into the reconnect quarter-hour: across the
 <span id="txt-n-out"></span> simulated outages that bucket carries <strong><span id="txt-ratio"></span>&times;</strong> its
-true energy (median; range <span id="txt-ratio-range"></span>). Event-time bucketing with <code>W = 6 h</code> and an
-idempotent <code>ON CONFLICT (asset_id, timestamp_utc) DO UPDATE</code> places <span id="txt-rec"></span> % of delayed
-intervals in their own quarter-hour and counts <span id="txt-dup"></span> % duplicate energy.</p>
+true energy (median; range <span id="txt-ratio-range"></span>). Event-time bucketing that drops packets later than
+<em>W</em> keeps <span id="txt-tradeoff"></span> of delayed intervals at <em>W</em> = <span id="txt-w-list"></span> h.
+<code>W = 6 h</code> with an idempotent <code>ON CONFLICT (asset_id, timestamp_utc) DO UPDATE</code> recovers
+all of them by construction, because 6 h exceeds the longest simulated arrival lag (<span id="txt-max-lag"></span> h),
+and counts <span id="txt-dup"></span> % duplicate energy.</p>
 
 <div class="card" style="margin-bottom: 14px;">
   <div class="controls">
@@ -175,11 +177,14 @@ function renderTiles() {
   const wh = H.watermark_headline;
   const dst = H.dst_headline;
   const dq = H.dq_headline;
+  const eventTime = H.ingestion_benchmark.slice(1);
+  const upsert = eventTime[eventTime.length - 1];
   const items = [
+    [`${eventTime.map(r => fmt(r.delayed_intervals_recovered_pct, 1)).join(" / ")} %`,
+     `Delayed LTE backfill intervals recovered at W = ${eventTime.map(r => fmt(r.watermark_horizon_h, 1)).join(" / ")} h; ` +
+     `W = ${fmt(upsert.watermark_horizon_h, 1)} h exceeds the longest lag (${fmt(H.fleet.max_arrival_lag_h, 2)} h), so it recovers all by construction`],
     [`${fmt(wh.naive_reconnect_ratio_median_x, 1)}x / ${fmt(wh.naive_affected_buckets_nmae_pct, 0)} %`,
      `Naive ingestion-time: median reconnect-bucket energy vs truth over ${H.fleet.n_lte_outages} outages & energy nMAE in outage-affected buckets`],
-    [`${fmt(wh.upsert_delayed_recovery_pct, 1)} % / ${fmt(wh.upsert_duplicate_energy_pct, 2)} %`,
-     "Delayed LTE backfill intervals placed in their own quarter-hour & duplicate energy counted with W = 6 h + upsert"],
     [`-${fmt(dst.oct25_lost_mwh_naive, 2)} MWh (${fmt(dst.oct25_lost_pct_naive, 2)} %)`,
      `25 Oct 2026 (25 h DST fall-back) loss under naive local-time key overwrite vs ${fmt(dst.oct25_reconciled_error_mwh, 3)} MWh in UTC`],
     [`${fmt(dq.macro_f1, 3)} macro-F1`,
@@ -198,7 +203,10 @@ function renderProse() {
   set("txt-n-out", H.fleet.n_lte_outages);
   set("txt-ratio", fmt(wh.naive_reconnect_ratio_median_x, 1));
   set("txt-ratio-range", `${fmt(wh.naive_reconnect_ratio_min_x, 1)}x to ${fmt(wh.naive_reconnect_ratio_max_x, 1)}x`);
-  set("txt-rec", fmt(wh.upsert_delayed_recovery_pct, 1));
+  const eventTime = H.ingestion_benchmark.slice(1);
+  set("txt-tradeoff", eventTime.map(r => `${fmt(r.delayed_intervals_recovered_pct, 1)} %`).join(" / "));
+  set("txt-w-list", eventTime.map(r => fmt(r.watermark_horizon_h, 1)).join(" / "));
+  set("txt-max-lag", fmt(H.fleet.max_arrival_lag_h, 2));
   set("txt-dup", fmt(wh.upsert_duplicate_energy_pct, 2));
   set("txt-dst-lost", fmt(dst.oct25_lost_mwh_naive, 2));
   set("txt-dst-pct", fmt(dst.oct25_lost_pct_naive, 2));

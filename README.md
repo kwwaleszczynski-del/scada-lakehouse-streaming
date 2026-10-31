@@ -31,10 +31,21 @@ This repository simulates those failure modes on a synthetic `50 MW` hybrid flee
 All numbers come from `python -m scada_lakehouse` (files in `results/`). The tests recompute each metric independently
 and check that the committed CSV files match a fresh run.
 
+The main result is the watermark trade-off. Event-time bucketing that drops packets arriving more than $`W`$ after
+their PLC timestamp keeps this share of the `2,130` asset-minutes delayed by the `18` LTE outages
+(`results/ingestion_benchmark.csv`):
+
+| Watermark $`W`$ | `0.5 h` | `1.0 h` | `2.0 h` | `4.0 h` | `6.0 h` |
+|---|---:|---:|---:|---:|---:|
+| Delayed minutes recovered | `22.07 %` | `46.67 %` | `81.03 %` | `99.62 %` | `100.00 %` |
+
+A shorter watermark closes each quarter-hour sooner but drops the tail of the longer outages. The longest simulated
+arrival lag is `4.21 h`, so any $`W`$ above it keeps every delayed minute.
+
 | Failure mode | Naive handling | Event-time pipeline |
 |---|---:|---:|
-| Energy in the reconnect quarter-hour vs truth (median over `18` LTE outages) | `9.19x` (range `3.73x` to `59.81x`) | `1.00x` |
-| Energy error in outage-affected quarter-hours (nMAE) | `185.40 %` | `0.00 %` |
+| Energy in the reconnect quarter-hour vs truth (median over `18` LTE outages) | `9.19x` (range `3.73x` to `59.81x`) | `1.00x` at every $`W`$ (by construction: event time never moves the backlog into this bucket) |
+| Energy error in outage-affected quarter-hours (nMAE) | `185.40 %` | `0.00 %` at `W = 6 h`, by construction: `6 h` exceeds the longest lag of `4.21 h` (`0.12 %` at `W = 4 h`) |
 | QoS-1 duplicate energy counted | `1.97 %` of true energy | `0.00 %` |
 | Fleet energy on the 25-hour DST day (25 October 2026) | `-28.028 MWh` (`-6.02 %`) | `0.000 MWh`, `100.00 %` of rows on their true UTC minute |
 

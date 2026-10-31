@@ -438,6 +438,9 @@ def test_27_readme_tables_match_committed_results():
             f"`{r['asset_15m_power_rmse_kw']:,.2f} kW`",
         ]
         assert_row(cells if i == 0 else cells + [f"`{r['watermark_horizon_h']:.1f} h`"])
+    event_time = pd.read_csv(results / "ingestion_benchmark.csv").iloc[1:]
+    assert_row([f"`{w:.1f} h`" for w in event_time["watermark_horizon_h"]])
+    assert_row([f"`{p:.2f} %`" for p in event_time["delayed_intervals_recovered_pct"]])
     for _, r in pd.read_csv(results / "dst_reconciliation.csv").iterrows():
         assert_row(
             [
@@ -482,3 +485,8 @@ def test_27_readme_tables_match_committed_results():
         f"`{fleet['max_arrival_lag_h']:.2f} h`",
     ]:
         assert token in readme, token
+    nmae_at = [
+        f"`{r['affected_buckets_energy_nmae_pct']:.2f} %` at `W = {r['watermark_horizon_h']:g} h`"
+        for _, r in event_time.iloc[-2:].iterrows()
+    ]
+    assert_row([*nmae_at, f"longest lag of `{fleet['max_arrival_lag_h']:.2f} h`"])
